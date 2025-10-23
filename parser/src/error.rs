@@ -3,6 +3,8 @@ use std::{fmt::Display, iter};
 use lalrpop_util::lexer::Token;
 use thiserror::Error;
 
+use crate::ParseSequenceError;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Location {
     pub line: usize,
@@ -55,7 +57,7 @@ pub struct ParseError {
 impl ParseError {
     pub(super) fn from_lalrpop(
         src_str: &str,
-        err: lalrpop_util::ParseError<usize, Token<'_>, &str>,
+        err: lalrpop_util::ParseError<usize, Token<'_>, ParseSequenceError>,
     ) -> Self {
         use lalrpop_util::ParseError::*;
 
@@ -96,7 +98,7 @@ impl ParseError {
                 expected: Vec::new(),
             },
             User { error } => ParseError {
-                msg: error.into(),
+                msg: format!("{:?}", error),
                 expected: Vec::new(),
                 span: Span::default(),
             },

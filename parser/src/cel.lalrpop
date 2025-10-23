@@ -1,7 +1,11 @@
-use crate::{RelationOp, ArithmeticOp, Expression, UnaryOp, Member, Atom, parse_bytes, parse_string};
+use crate::{RelationOp, ArithmeticOp, Expression, UnaryOp, Member, Atom, parse_bytes, parse_string, ParseSequenceError};
 use std::sync::Arc;
 
 grammar;
+
+extern {
+    type Error = ParseSequenceError;
+}
 
 match {
     // Skip whitespace and comments
@@ -121,15 +125,44 @@ RelationOp: RelationOp = {
 
 Atom: Atom = {
     // Integer literals. Annoying to parse :/
-    r"-?[0-9]+" => Atom::Int(<>.parse().unwrap()),
-    <s:r"-?0[xX][0-9a-fA-F]+"> => Atom::Int(i64::from_str_radix(&s.chars().filter(|&x| x != 'x' && x != 'X').collect::<String>(), 16).unwrap()),
-    <s:r"[0-9]+[uU]"> => Atom::UInt(s[..s.len()-1].parse().unwrap()),
-    <s:r"-?0[xX][0-9a-fA-F]+[uU]"> => Atom::UInt(u64::from_str_radix(&s.chars().filter(|&x| x != 'x' && x != 'X' && x != 'u' && x != 'U').collect::<String>(), 16).unwrap()),
+    r"-?[0-9]+" =>? Ok(Atom::Int(<>.parse().map_err(|e| ParseSequenceError::InvalidSymbol { 
+        symbol: <>.to_string(), 
+        index: 0, 
+        string: <>.to_string() 
+    })?)),
+    <s:r"-?0[xX][0-9a-fA-F]+"> =>? Ok(Atom::Int(i64::from_str_radix(&s.chars().filter(|&x| x != 'x' && x != 'X').collect::<String>(), 16)
+        .map_err(|e| ParseSequenceError::InvalidSymbol { 
+            symbol: s.to_string(), 
+            index: 0, 
+            string: s.to_string() 
+        })?)),
+    <s:r"[0-9]+[uU]"> =>? Ok(Atom::UInt(s[..s.len()-1].parse()
+        .map_err(|e| ParseSequenceError::InvalidSymbol { 
+            symbol: s.to_string(), 
+            index: 0, 
+            string: s.to_string() 
+        })?)),
+    <s:r"-?0[xX][0-9a-fA-F]+[uU]"> =>? Ok(Atom::UInt(u64::from_str_radix(&s.chars().filter(|&x| x != 'x' && x != 'X' && x != 'u' && x != 'U').collect::<String>(), 16)
+        .map_err(|e| ParseSequenceError::InvalidSymbol { 
+            symbol: s.to_string(), 
+            index: 0, 
+            string: s.to_string() 
+        })?)),
 
     // Float with decimals and optional exponent
-    r"([-+]?[0-9]*\.[0-9]+([eE][-+]?[0-9]+)?)" => Atom::Float(<>.parse().unwrap()),
+    r"([-+]?[0-9]*\.[0-9]+([eE][-+]?[0-9]+)?)" =>? Ok(Atom::Float(<>.parse()
+        .map_err(|e| ParseSequenceError::InvalidSymbol { 
+            symbol: <>.to_string(), 
+            index: 0, 
+            string: <>.to_string() 
+        })?)),
     // Float with no decimals and required exponent
-    r"[-+]?[0-9]+[eE][-+]?[0-9]+" => Atom::Float(<>.parse().unwrap()),
+    r"[-+]?[0-9]+[eE][-+]?[0-9]+" =>? Ok(Atom::Float(<>.parse()
+        .map_err(|e| ParseSequenceError::InvalidSymbol { 
+            symbol: <>.to_string(), 
+            index: 0, 
+            string: <>.to_string() 
+        })?)),
 
     // NOTE: I've commented out some of the more complex string parsing rules
     // because they're causing "attempt to subtract with overflow" errors within
@@ -144,22 +177,22 @@ Atom: Atom = {
     //        neither a double quote nor a backslash. It uses a non-capturing group (?:...) to repeat the pattern.
     //        This handles sequences like \", \\, or any other escaped character.
     //   3. `"`: Match the closing double quote.
-    r#""([^"\\]*(?:\\.[^"\\]*)*)""# => Atom::String(parse_string(<>).unwrap().into()),
-    r#"[rR]"([^"\\]*(?:\\.[^"\\]*)*)""# => Atom::String(parse_string(<>).unwrap().into()),
+    r#""([^"\\]*(?:\\.[^"\\]*)*)""# =>? Ok(Atom::String(parse_string(<>)?.into())),
+    r#"[rR]"([^"\\]*(?:\\.[^"\\]*)*)""# =>? Ok(Atom::String(parse_string(<>)?.into())),
     // r#""""(\\.|[^"{3}])*""""# => Atom::String(<>.to_string().into()),
 
     // Single quoted string
     // Uses similar regex as above, but replace double quote with a single one
-    r#"'([^'\\]*(?:\\.[^'\\]*)*)'"# => Atom::String(parse_string(<>).unwrap().into()),
-    r#"[rR]'([^'\\]*(?:\\.[^'\\]*)*)'"# => Atom::String(parse_string(<>).unwrap().into()),
+    r#"'([^'\\]*(?:\\.[^'\\]*)*)'"# =>? Ok(Atom::String(parse_string(<>)?.into())),
+    r#"[rR]'([^'\\]*(?:\\.[^'\\]*)*)'"# =>? Ok(Atom::String(parse_string(<>)?.into())),
     // r#"'''(\\.|[^'{3}])*'''"# => Atom::String(<>.to_string().into()),
 
     // Double quoted bytes
-    r#"[bB]"(\\.|[^"\n])*""# => Atom::Bytes(parse_bytes(&<>[2..<>.len()-1]).unwrap().into()),
+    r#"[bB]"(\\.|[^"\n])*""# =>? Ok(Atom::Bytes(parse_bytes(&<>[2..<>.len()-1])?.into())),
     // r#"[bB]"""(\\.|[^"{3}])*""""# => Atom::Bytes(Vec::from(<>.as_bytes()).into()),
 
     // Single quoted bytes
-    r#"[bB]'(\\.|[^'\n])*'"# => Atom::Bytes(parse_bytes(&<>[2..<>.len()-1]).unwrap().into()),
+    r#"[bB]'(\\.|[^'\n])*'"# =>? Ok(Atom::Bytes(parse_bytes(&<>[2..<>.len()-1])?.into())),
     // r#"[bB]'''(\\.|[^'{3}])*'''"# => Atom::Bytes(Vec::from(<>.as_bytes()).into()),
 
     "true" => Atom::Bool(true),
